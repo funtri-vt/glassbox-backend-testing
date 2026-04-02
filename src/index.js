@@ -156,21 +156,28 @@ export default {
           return Response.json({ error: "Invalid domains list" }, { status: 400, headers: corsHeaders });
         }
 
-        // 1. Increment server version once for this batch
+        // 1. Increment server version
         await env.DB.prepare(`UPDATE system_state SET current_version = current_version + 1 WHERE id = 1`).run();
         const state = await env.DB.prepare(`SELECT current_version FROM system_state WHERE id = 1`).first();
 
-        // 2. Prepare batch inserts for maximum performance
-        const stmts = domains.map(domain => 
+        // 2 (NEW): Prepare statements to deactivate old rules for these domains
+        const retireStmts = domains.map(domain => 
+            env.DB.prepare(
+                `UPDATE rules SET is_active = 0, version_removed = ? WHERE domain = ? AND is_active = 1`
+            ).bind(state.current_version, domain)
+        );
+
+        // 3. Prepare batch inserts for the new block rules
+        const insertStmts = domains.map(domain => 
             env.DB.prepare(
                 `INSERT INTO rules (domain, action, version_added) VALUES (?, 'block', ?)`
             ).bind(domain, state.current_version)
         );
 
-        // 3. Run all inserts simultaneously
-        await env.DB.batch(stmts);
+        // 4. Run all retirements AND insertions simultaneously in one clean transaction!
+        await env.DB.batch([...retireStmts, ...insertStmts]);
 
-        // 4. Clear KV Cache so the fleet pulls the new blocks
+        // 5. Clear KV Cache
         ctx.waitUntil(env.GLASSBOX_KV.delete("master_rules"));
 
         return Response.json({ success: true, message: `Blocked ${domains.length} domains.` }, { headers: corsHeaders });
