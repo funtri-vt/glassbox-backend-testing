@@ -89,8 +89,32 @@ export async function handleInsightRequest(request, env, url) {
 export async function handleAdminInsightRequest(request, env, ctx, url) {
     // ROUTE: GET /api/admin/insight/reports
     if (request.method === "GET" && url.pathname === "/api/admin/insight/reports") {
-        // Future logic to fetch ROI and time-tracking stats will go here!
-        return Response.json({ message: "Insight reports coming soon!" }, { headers: corsHeaders });
+        try {
+            // Aggregate total minutes spent per target, ordered by highest usage
+            const { results } = await env.DB.prepare(`
+                SELECT target, SUM(minutes_spent) as total_minutes 
+                FROM insight_logs 
+                GROUP BY target 
+                ORDER BY total_minutes DESC 
+                LIMIT 50
+            `).all();
+
+            // Check if we actually have data
+            if (!results || results.length === 0) {
+                return Response.json({ message: "No analytics data available yet. Waiting for Insight Agents to report in." }, { headers: corsHeaders });
+            }
+
+            // Format it nicely for the chart (round to 1 decimal place)
+            const reports = results.map(row => ({
+                target: row.target,
+                total_minutes: Math.round(row.total_minutes * 10) / 10
+            }));
+
+            return Response.json({ reports: reports }, { headers: corsHeaders });
+        } catch (err) {
+            console.error("Admin Insight Report Error:", err);
+            return jsonError("Failed to generate insight reports", 500);
+        }
     }
 
     return null;
