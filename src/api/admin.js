@@ -97,5 +97,13 @@ export async function handleAdminRequest(request, env, ctx, url) {
         return Response.json({ success: true, message: `Blocked ${blocksToProcess.length} targets.` }, { headers: corsHeaders });
     }
 
+    // ------------------------------------------------------------------
+    // ROUTE: GET /api/admin/insight/reports (Future Insight Analytics)
+    // ------------------------------------------------------------------
+    if (request.method === "GET" && url.pathname === "/api/admin/insight/reports") {
+        // Future logic to fetch ROI and time-tracking stats will go here
+        return Response.json({ message: "Insight reports coming soon!" }, { headers: corsHeaders });
+    }
+
     return null; // Hand back to router if no route matched
 }
