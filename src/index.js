@@ -1,7 +1,6 @@
 import { corsHeaders } from './utils/helpers.js';
 import { rebuildMasterRulesCache } from './utils/cache.js';
-import { handleFilterRequest } from './api/filter.js';
-import { handleAdminRequest } from './api/admin.js';
+import { handleApiRequest } from './api.js';
 
 export default {
     async fetch(request, env, ctx) {
@@ -14,29 +13,14 @@ export default {
 
         try {
             // ---------------------------------------------------------
-            // 🛡️ SUB-ROUTER: Student Filter Extension
+            // 🌐 MASTER API ROUTER
             // ---------------------------------------------------------
-            if (url.pathname.startsWith("/api/filter/")) {
-                const response = await handleFilterRequest(request, env, url);
+            if (url.pathname.startsWith("/api/")) {
+                const response = await handleApiRequest(request, env, ctx, url);
                 if (response) return response;
             }
 
-            // ---------------------------------------------------------
-            // 🏛️ SUB-ROUTER: IT Admin Dashboard
-            // ---------------------------------------------------------
-            if (url.pathname.startsWith("/api/admin/")) {
-                const response = await handleAdminRequest(request, env, ctx, url);
-                if (response) return response;
-            }
-            
-            // ---------------------------------------------------------
-            // 📊 SUB-ROUTER: Insight Extension (Future Placeholder)
-            // ---------------------------------------------------------
-            if (url.pathname.startsWith("/api/insight/")) {
-                // Future code will go here!
-            }
-
-            // 404 Fallback
+            // 404 Fallback for anything that didn't match the API routes
             return new Response("Not Found", { status: 404, headers: corsHeaders });
 
         } catch (err) {
@@ -53,7 +37,7 @@ export default {
     // ------------------------------------------------------------------
     async scheduled(event, env, ctx) {
         console.log("Cron triggered...");
-        // ⚡ Delegates the work to our new centralized Cache Manager
+        // Delegates the work to our centralized Cache Manager
         await rebuildMasterRulesCache(env, ctx);
     }
 };
