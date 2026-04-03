@@ -1,4 +1,4 @@
-import { corsHeaders, jsonError } from '../utils/helpers.js';
+import { corsHeaders, cacheHeaders, jsonError } from '../utils/helpers.js';
 
 // ------------------------------------------------------------------
 // 🎒 STUDENT-FACING INSIGHT ROUTES (No Auth Required)
@@ -20,11 +20,12 @@ export async function handleInsightRequest(request, env, url) {
             const { results: apps } = await env.DB.prepare(`SELECT domain FROM approved_apps`).all();
             const approvedDomains = apps.map(a => a.domain);
 
+            // ⚡ APPLIED CACHE HEADERS: Absorb the 8:00 AM login rush!
             return Response.json({
                 success: true,
                 config: config,
                 approvedApps: approvedDomains
-            }, { headers: corsHeaders });
+            }, { headers: cacheHeaders });
 
         } catch (err) {
             console.error("Insight Sync Error:", err);
