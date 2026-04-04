@@ -54,25 +54,24 @@ export async function handleInsightRequest(request, env, url) {
             const { results: apps } = await env.DB.prepare(`SELECT domain FROM approved_apps`).all();
             const approvedSet = new Set(apps.map(a => a.domain));
 
-            const today = new Date().toISOString().split('T')[0]; // Format: YYYY-MM-DD
-
-            // Prepare batch statements for high-speed insertion
-            const insertStmts = safeLogs.map(log => {
-                // Ensure values are safe types
+            // 🚀 NEW: Firehose telemetry into Cloudflare Analytics Engine
+            let pointsWritten = 0;
+            for (const log of safeLogs) {
                 const target = String(log.target).substring(0, 255);
                 const minutes = Number(log.minutes) || 0;
-                const isApproved = approvedSet.has(target) ? 1 : 0;
+                const isApprovedStr = approvedSet.has(target) ? "approved" : "unapproved";
 
-                return env.DB.prepare(
-                    `INSERT INTO insight_logs (student_hash, target, minutes_spent, log_date, is_approved) 
-                     VALUES (?, ?, ?, ?, ?)`
-                ).bind(studentHash, target, minutes, today, isApproved);
-            });
+                // Analytics Engine Format:
+                // blobs: [LogType, StudentHash, TargetUrl, ApprovedStatus]
+                // doubles: [MetricValue (e.g., minutes spent or hit count)]
+                env.GLASSBOX_LOGS.writeDataPoint({
+                    blobs: ["time_log", studentHash, target, isApprovedStr], 
+                    doubles: [minutes]
+                });
+                pointsWritten++;
+            }
 
-            // Execute all insertions in one atomic transaction
-            await env.DB.batch(insertStmts);
-
-            return Response.json({ success: true, message: `Ingested ${insertStmts.length} logs.` }, { headers: corsHeaders });
+            return Response.json({ success: true, message: `Ingested ${pointsWritten} telemetry logs.` }, { headers: corsHeaders });
 
         } catch (err) {
             console.error("Insight Ingest Error:", err);
