@@ -13,3 +13,8 @@ id = "YOUR_KV_ID_HERE"
 
 [triggers]
 crons = ["*/15 * * * *"]
+
+[observability]
+[observability.logs]
+enabled = true
+invocation_logs = false
