@@ -1,78 +1,65 @@
 import { corsHeaders, cacheHeaders, jsonError } from '../utils/helpers.js';
 
-// ------------------------------------------------------------------
-// 🎒 STUDENT-FACING INSIGHT ROUTES (No Auth Required)
-// ------------------------------------------------------------------
 export async function handleInsightRequest(request, env, url) {
-    // ROUTE: GET /api/insight/sync (Extension downloads config & approved apps)
+
+    // ROUTE: GET /api/insight/sync (Extension polls for config)
     if (request.method === "GET" && url.pathname === "/api/insight/sync") {
         try {
-            // 1. Fetch Global Settings (like the time threshold)
+            // Fetch system config and approved app list
             const { results: settings } = await env.DB.prepare(`SELECT setting_key, setting_value FROM system_settings`).all();
-            
-            // Convert array of key/value pairs into a simple config object
-            const config = {};
-            settings.forEach(s => {
-                config[s.setting_key] = s.setting_value;
-            });
+            const configObj = {};
+            settings.forEach(s => configObj[s.setting_key] = s.setting_value);
 
-            // 2. Fetch the Approved Apps list (just the domains)
             const { results: apps } = await env.DB.prepare(`SELECT domain FROM approved_apps`).all();
-            const approvedDomains = apps.map(a => a.domain);
+            const appDomains = apps.map(a => a.domain);
 
-            // ⚡ APPLIED CACHE HEADERS: Absorb the 8:00 AM login rush!
             return Response.json({
-                success: true,
-                config: config,
-                approvedApps: approvedDomains
+                config: configObj,
+                approvedApps: appDomains
             }, { headers: cacheHeaders });
-
         } catch (err) {
-            console.error("Insight Sync Error:", err);
-            return jsonError("Failed to sync insight config", 500);
+            return jsonError("Failed to fetch insight config", 500);
         }
     }
 
-    // ROUTE: POST /api/insight/ingest (Extension uploads batched time logs)
+    // ROUTE: POST /api/insight/ingest (Extension uploads chunked telemetry)
     if (request.method === "POST" && url.pathname === "/api/insight/ingest") {
         try {
             const body = await request.json();
             const { studentHash, logs } = body;
 
-            // 🛡️ Basic Payload Validation
-            if (!studentHash || typeof studentHash !== 'string') {
-                return jsonError("Invalid student identity.", 400);
-            }
-            if (!Array.isArray(logs) || logs.length === 0) {
-                return Response.json({ success: true, message: "No logs to process" }, { headers: corsHeaders });
+            if (!studentHash || !Array.isArray(logs)) {
+                return jsonError("Invalid payload format", 400);
             }
 
-            // Cap the payload size to prevent abuse (e.g., max 500 logs per batch)
-            const safeLogs = logs.slice(0, 500);
-
-            // Fetch approved apps to cross-reference server-side (Double Verification)
+            // Fetch approved apps for server-side verification
             const { results: apps } = await env.DB.prepare(`SELECT domain FROM approved_apps`).all();
             const approvedSet = new Set(apps.map(a => a.domain));
 
-            const today = new Date().toISOString().split('T')[0]; // Format: YYYY-MM-DD
+            let pointsWritten = 0;
 
-            // Prepare batch statements for high-speed insertion
-            const insertStmts = safeLogs.map(log => {
-                // Ensure values are safe types
+            for (const log of logs) {
+                // Ensure target is safe length
                 const target = String(log.target).substring(0, 255);
-                const minutes = Number(log.minutes) || 0;
-                const isApproved = approvedSet.has(target) ? 1 : 0;
+                const value = Number(log.value) || 0;
+                const logType = log.type === 'hit' ? 'hit_log' : 'time_log';
+                
+                // For hit logs, extract the root domain from the path to check approval status
+                const domainToCheck = logType === 'hit_log' ? target.split('/')[0] : target;
+                const isApprovedStr = approvedSet.has(domainToCheck) ? "approved" : "unapproved";
 
-                return env.DB.prepare(
-                    `INSERT INTO insight_logs (student_hash, target, minutes_spent, log_date, is_approved) 
-                     VALUES (?, ?, ?, ?, ?)`
-                ).bind(studentHash, target, minutes, today, isApproved);
-            });
+                // 🚀 Firehose telemetry into Cloudflare Analytics Engine
+                // format: blobs: [LogType, StudentHash, TargetUrl, ApprovedStatus]
+                // format: doubles: [MetricValue (minutes or hits)]
+                env.GLASSBOX_LOGS.writeDataPoint({
+                    blobs: [logType, studentHash, target, isApprovedStr], 
+                    doubles: [value]
+                });
+                
+                pointsWritten++;
+            }
 
-            // Execute all insertions in one atomic transaction
-            await env.DB.batch(insertStmts);
-
-            return Response.json({ success: true, message: `Ingested ${insertStmts.length} logs.` }, { headers: corsHeaders });
+            return Response.json({ success: true, message: `Ingested ${pointsWritten} data points.` }, { headers: corsHeaders });
 
         } catch (err) {
             console.error("Insight Ingest Error:", err);
@@ -92,6 +79,11 @@ export async function handleAdminInsightRequest(request, env, ctx, url) {
     // ---------------------------------------------------------
     if (request.method === "GET" && url.pathname === "/api/admin/insight/reports") {
         try {
+            // ⚠️ SECURITY CHECK: Ensure Cloudflare API credentials exist
+            if (!env.CF_ACCOUNT_ID || !env.CF_API_TOKEN) {
+                return jsonError("Cloudflare API credentials not configured on Worker.", 500);
+            }
+
             // Extract filtering parameters from the URL
             const timeframe = url.searchParams.get("timeframe") || "30"; // Days, defaults to 30
             const studentHash = url.searchParams.get("studentHash") || null;
@@ -99,47 +91,60 @@ export async function handleAdminInsightRequest(request, env, ctx, url) {
             const minMinutes = parseFloat(url.searchParams.get("minMinutes")) || 0;
             const maxMinutes = parseFloat(url.searchParams.get("maxMinutes")) || null;
 
-            // Start building the dynamic SQL query
-            let query = `SELECT target, SUM(minutes_spent) as total_minutes FROM insight_logs WHERE 1=1`;
-            const bindParams = [];
+            // 🚀 Querying Cloudflare Analytics Engine via the SQL API
+            // blob1 = logType, blob2 = studentHash, blob3 = target, blob4 = isApprovedStr, double1 = value
+            let query = `SELECT blob3 AS target, SUM(double1) AS total_minutes FROM glassbox_logs WHERE blob1 = 'time_log'`;
 
             // Filter by Date
             if (timeframe !== "all") {
                 const days = parseInt(timeframe) || 30;
-                query += ` AND log_date >= date('now', ?)`;
-                bindParams.push(`-${days} days`);
+                query += ` AND timestamp >= NOW() - INTERVAL '${days}' DAY`;
             }
 
             // Filter by Student Hash
             if (studentHash) {
-                query += ` AND student_hash = ?`;
-                bindParams.push(studentHash);
+                // Ensure no SQL injection via hash format (alphanumeric check)
+                const cleanHash = studentHash.replace(/[^a-fA-F0-9]/g, '');
+                query += ` AND blob2 = '${cleanHash}'`;
             }
 
             // Group by the app/domain
-            query += ` GROUP BY target HAVING total_minutes >= ?`;
-            bindParams.push(minMinutes);
+            query += ` GROUP BY blob3 HAVING total_minutes >= ${minMinutes}`;
 
             // Filter by max time (if provided)
             if (maxMinutes !== null) {
-                query += ` AND total_minutes <= ?`;
-                bindParams.push(maxMinutes);
+                query += ` AND total_minutes <= ${maxMinutes}`;
             }
 
             // Finish the query by ordering and limiting
-            query += ` ORDER BY total_minutes DESC LIMIT ?`;
-            bindParams.push(limit);
+            query += ` ORDER BY total_minutes DESC LIMIT ${limit}`;
 
-            // Execute the dynamic query
-            const { results } = await env.DB.prepare(query).bind(...bindParams).all();
+            // Execute the query against the Cloudflare API
+            const cfApiUrl = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/analytics_engine/sql`;
+            const cfResponse = await fetch(cfApiUrl, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${env.CF_API_TOKEN}`,
+                    'Content-Type': 'application/x-sql'
+                },
+                body: query
+            });
+
+            const data = await cfResponse.json();
+
+            // Check if the Cloudflare API request was successful
+            if (!cfResponse.ok || !data.success) {
+                console.error("Analytics Engine Query Error:", data.errors);
+                throw new Error(data.errors?.[0]?.message || "Failed to query Analytics Engine.");
+            }
 
             // Check if we actually have data
-            if (!results || results.length === 0) {
+            if (!data.data || data.data.length === 0) {
                 return Response.json({ message: "No analytics data matched these filters." }, { headers: corsHeaders });
             }
 
             // Format it nicely for the chart (round to 1 decimal place)
-            const reports = results.map(row => ({
+            const reports = data.data.map(row => ({
                 target: row.target,
                 total_minutes: Math.round(row.total_minutes * 10) / 10
             }));
@@ -148,6 +153,56 @@ export async function handleAdminInsightRequest(request, env, ctx, url) {
         } catch (err) {
             console.error("Admin Insight Report Error:", err);
             return jsonError("Failed to generate insight reports", 500);
+        }
+    }
+
+    // ---------------------------------------------------------
+    // ROUTE: GET /api/admin/insight/traffic (Live URL Hit Data)
+    // ---------------------------------------------------------
+    if (request.method === "GET" && url.pathname === "/api/admin/insight/traffic") {
+        try {
+            if (!env.CF_ACCOUNT_ID || !env.CF_API_TOKEN) {
+                return jsonError("Cloudflare API credentials not configured on Worker.", 500);
+            }
+
+            const timeframe = url.searchParams.get("timeframe") || "7"; // Default to 7 days for live traffic
+            const limit = parseInt(url.searchParams.get("limit")) || 100;
+
+            // Querying hit_logs. blob3 = target url, blob4 = status, double1 = hit counts
+            let query = `SELECT blob3 AS target, blob4 AS status, SUM(double1) AS hits FROM glassbox_logs WHERE blob1 = 'hit_log'`;
+
+            if (timeframe !== "all") {
+                const days = parseInt(timeframe) || 7;
+                query += ` AND timestamp >= NOW() - INTERVAL '${days}' DAY`;
+            }
+
+            query += ` GROUP BY blob3, blob4 ORDER BY hits DESC LIMIT ${limit}`;
+
+            const cfApiUrl = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID}/analytics_engine/sql`;
+            const cfResponse = await fetch(cfApiUrl, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${env.CF_API_TOKEN}`,
+                    'Content-Type': 'application/x-sql'
+                },
+                body: query
+            });
+
+            const data = await cfResponse.json();
+
+            if (!cfResponse.ok || !data.success) {
+                console.error("Analytics Engine Query Error (Traffic):", data.errors);
+                throw new Error(data.errors?.[0]?.message || "Failed to query Analytics Engine.");
+            }
+
+            if (!data.data || data.data.length === 0) {
+                return Response.json({ traffic: [] }, { headers: corsHeaders });
+            }
+
+            return Response.json({ traffic: data.data }, { headers: corsHeaders });
+        } catch (err) {
+            console.error("Admin Insight Traffic Error:", err);
+            return jsonError("Failed to load live traffic data", 500);
         }
     }
 
