@@ -40,7 +40,6 @@ export default {
 
         // 🧹 1. THE 15-MINUTE JOB: Routine Cache & Rule Cleanup
         if (event.cron === "*/15 * * * *") {
-            // Delegates the work to our centralized Cache Manager
             await rebuildMasterRulesCache(env, ctx);
 
             try {
@@ -62,10 +61,8 @@ export default {
         
         // 📊 2. THE HOURLY JOB: The Intelligent "Tick-Tock" Rollup
         else if (event.cron === "0 * * * *") {
-            // Pull the school's timezone from vars, default to UTC if missing
             const timezone = env.SCHOOL_TIMEZONE || "UTC";
             
-            // Extract the current hour (0-23) in that specific timezone
             const localHourStr = new Intl.DateTimeFormat("en-US", {
                 timeZone: timezone,
                 hour: "numeric",
@@ -74,7 +71,6 @@ export default {
             
             const localHour = parseInt(localHourStr, 10);
             
-            // Only execute the massive rollup if it's midnight locally
             if (localHour === 0) {
                 console.log(`Midnight struck in ${timezone}! Running daily data rollup...`);
                 await runMidnightRollup(env);
@@ -95,11 +91,9 @@ async function runMidnightRollup(env) {
             return;
         }
 
-        // 1. Query the Analytics Engine for exactly yesterday's data
-        // We use ClickHouse conditional logic (if) to sum hits and minutes properly in a single sweep
+        // 1. Query the Analytics Engine (Student Hash removed to prevent cardinality explosion)
         const query = `
             SELECT 
-                blob2 AS hash, 
                 blob3 AS target, 
                 blob4 AS status, 
                 SUM(if(blob1 = 'time_log', double1, 0)) AS total_minutes, 
@@ -107,7 +101,7 @@ async function runMidnightRollup(env) {
             FROM glassbox_logs 
             WHERE timestamp >= toStartOfDay(NOW() - INTERVAL '1' DAY) 
               AND timestamp < toStartOfDay(NOW()) 
-            GROUP BY hash, target, status
+            GROUP BY target, status
         `;
 
         const cfApiUrl = `https://api.cloudflare.com/client/v4/accounts/${env.CF_ACCOUNT_ID.trim()}/analytics_engine/sql`;
@@ -132,24 +126,22 @@ async function runMidnightRollup(env) {
             return;
         }
 
-        // 2. Determine yesterday's date string (YYYY-MM-DD) based on the school's timezone
         const yesterdayStr = new Intl.DateTimeFormat("en-CA", { 
             timeZone: env.SCHOOL_TIMEZONE || "UTC", 
             year: "numeric", month: "2-digit", day: "2-digit" 
         }).format(new Date(Date.now() - 86400000));
 
-        // 3. Map the results to D1 Insert Statements
+        // 3. Map the results to D1 Insert Statements (No hash)
         const insertStmts = rows.map(row => {
             return env.TELEMETRY_DB.prepare(`
-                INSERT INTO daily_rollups (log_date, student_hash, target, status, total_minutes, total_hits)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(log_date, student_hash, target) 
+                INSERT INTO daily_rollups (log_date, target, status, total_minutes, total_hits)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(log_date, target) 
                 DO UPDATE SET 
                     total_minutes = excluded.total_minutes,
                     total_hits = excluded.total_hits
             `).bind(
                 yesterdayStr,
-                row.hash,
                 row.target,
                 row.status,
                 row.total_minutes,
@@ -157,7 +149,6 @@ async function runMidnightRollup(env) {
             );
         });
 
-        // 4. Batch insert the data safely in chunks of 100 to respect D1 transaction limits
         const CHUNK_SIZE = 100;
         for (let i = 0; i < insertStmts.length; i += CHUNK_SIZE) {
             const chunk = insertStmts.slice(i, i + CHUNK_SIZE);
@@ -166,8 +157,6 @@ async function runMidnightRollup(env) {
         
         console.log(`✅ Rollup complete: Saved ${rows.length} aggregated rows for ${yesterdayStr}.`);
 
-        // 5. Auto-Prune (Cold Data Deletion)
-        // Keep the database hyper-fast by permanently deleting data over 1 year old
         await env.TELEMETRY_DB.prepare(`DELETE FROM daily_rollups WHERE log_date < date('now', '-1 year')`).run();
         console.log("✅ Auto-pruned stale telemetry older than 1 year.");
 
