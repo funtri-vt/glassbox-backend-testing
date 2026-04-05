@@ -35,5 +35,5 @@ crons = ["*/15 * * * *", "0 * * * *"]
 [vars]
 # Used by the hourly "Tick-Tock" cron to determine when local midnight occurs.
 # Change this to your timezone (e.g., "America/New_York") for your deployment.
-SCHOOL_TIMEZONE = "UTC"
+SCHOOL_TIMEZONE = "America/New_York"
 CF_ACCOUNT_ID = "bdf5769d5b5c59cda39869246f25cc79"
