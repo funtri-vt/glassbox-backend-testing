@@ -2,6 +2,9 @@ name = "glassbox-backend-testing"
 main = "src/index.js"
 compatibility_date = "2026-04-02"
 
+# 🎯 NEW: Enables Node.js native modules (like 'crypto') required by web-push
+compatibility_flags = ["nodejs_compat"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "glassbox-db"
