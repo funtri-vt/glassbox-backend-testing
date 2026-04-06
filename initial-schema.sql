@@ -30,6 +30,19 @@ CREATE TABLE IF NOT EXISTS unblock_requests (
 );
 
 -- ==========================================
+-- NEW: ADMIN PUSH NOTIFICATIONS
+-- ==========================================
+
+-- Stores Web Push API subscriptions for IT Admins
+CREATE TABLE IF NOT EXISTS admin_push_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ==========================================
 -- NEW: INSIGHT AGENT TABLES
 -- ==========================================
 

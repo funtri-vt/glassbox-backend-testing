@@ -2,6 +2,9 @@ name = "glassbox-backend-testing"
 main = "src/index.js"
 compatibility_date = "2026-04-02"
 
+# 🎯 NEW: Enables Node.js native modules (like 'crypto') required by web-push
+compatibility_flags = ["nodejs_compat"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "glassbox-db"
@@ -14,7 +17,7 @@ database_id = "3ac73a2f-1a38-4ce1-b73b-6b754939779b"
 
 [[kv_namespaces]]
 binding = "GLASSBOX_KV"
-id = "972c1fbb2a47474b8648a1efd777388e"
+id = "YOUR_kV_ID_HERE" # UPDATE THIS
 
 [observability]
 [observability.logs]
@@ -35,5 +38,5 @@ crons = ["*/15 * * * *", "0 * * * *"]
 [vars]
 # Used by the hourly "Tick-Tock" cron to determine when local midnight occurs.
 # Change this to your timezone (e.g., "America/New_York") for your deployment.
-SCHOOL_TIMEZONE = "America/New_York"
-CF_ACCOUNT_ID = "bdf5769d5b5c59cda39869246f25cc79"
+SCHOOL_TIMEZONE = "UTC"
+CF_ACCOUNT_ID = "YOUR_CF_ACCOUNT_ID_HERE" # UPDATE THIS
