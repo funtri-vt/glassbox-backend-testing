@@ -52,7 +52,6 @@ export default {
         else if (event.cron === "0 * * * *") {
             const timezone = env.SCHOOL_TIMEZONE || "UTC";
             
-            // 🎯 FIX: Used hourCycle 'h23' to guarantee midnight is '0' and not '24'
             const localHourStr = new Intl.DateTimeFormat("en-US", {
                 timeZone: timezone,
                 hour: "numeric",
@@ -80,6 +79,40 @@ async function runMidnightRollup(env) {
 
         const timezone = env.SCHOOL_TIMEZONE || "UTC";
 
+        // ==========================================
+        // 🎯 EXACT UTC BOUNDARY CALCULATION
+        // ==========================================
+        const now = new Date();
+        // 1. End of Period: Truncate current time to the exact hour (e.g., 04:00:15 -> 04:00:00 UTC)
+        const endTimestampUTC = new Date(Math.floor(now.getTime() / 3600000) * 3600000);
+        
+        // 2. Start of Period: Jump back exactly 24 hours
+        let startTimestampUTC = new Date(endTimestampUTC.getTime() - 86400000);
+        
+        // 3. DST Auto-Corrector: If 24 hours ago wasn't exactly midnight (due to Spring Forward / Fall Back), adjust it.
+        const getLocalHour = (date) => parseInt(new Intl.DateTimeFormat("en-US", { timeZone: timezone, hour: "numeric", hourCycle: "h23" }).format(date), 10);
+        
+        let attempts = 0;
+        while (getLocalHour(startTimestampUTC) !== 0 && attempts < 4) {
+            const h = getLocalHour(startTimestampUTC);
+            if (h > 12) {
+                startTimestampUTC = new Date(startTimestampUTC.getTime() + 3600000); // Shift forward if stuck in 23:00
+            } else {
+                startTimestampUTC = new Date(startTimestampUTC.getTime() - 3600000); // Shift backward if stuck in 01:00
+            }
+            attempts++;
+        }
+
+        // Format for standard SQL (YYYY-MM-DD HH:MM:SS)
+        const formatSqlTimestamp = (date) => date.toISOString().replace('T', ' ').substring(0, 19);
+        const startSql = formatSqlTimestamp(startTimestampUTC);
+        const endSql = formatSqlTimestamp(endTimestampUTC);
+
+        console.log(`Querying Analytics Engine from ${startSql} to ${endSql} (UTC)`);
+
+        // ==========================================
+        // 🗄️ QUERY CLOUDFLARE ANALYTICS
+        // ==========================================
         const query = `
             SELECT 
                 blob3 AS target, 
@@ -87,8 +120,8 @@ async function runMidnightRollup(env) {
                 SUM(if(blob1 = 'time_log', double1, 0)) AS total_minutes, 
                 SUM(if(blob1 = 'hit_log', double1, 0)) AS total_hits 
             FROM glassbox_logs 
-            WHERE timestamp >= toStartOfDay(NOW() - INTERVAL '1' DAY, '${timezone}') 
-              AND timestamp < toStartOfDay(NOW(), '${timezone}') 
+            WHERE timestamp >= '${startSql}' 
+              AND timestamp < '${endSql}' 
             GROUP BY target, status
         `;
 
@@ -114,12 +147,11 @@ async function runMidnightRollup(env) {
             return;
         }
 
-        // 🎯 FIX: Subtract 2 hours (7,200,000 ms) instead of 24 hours to safely land on "yesterday"
-        // This prevents DST "Spring Forward" 23-hour days from pushing the date back 48 hours!
+        // The exact date label for D1, safely shifted back 2 hours to avoid DST date-jumping
         const yesterdayStr = new Intl.DateTimeFormat("en-CA", { 
-            timeZone: env.SCHOOL_TIMEZONE || "UTC", 
+            timeZone: timezone, 
             year: "numeric", month: "2-digit", day: "2-digit" 
-        }).format(new Date(Date.now() - 7200000));
+        }).format(new Date(endTimestampUTC.getTime() - 7200000));
 
         const insertStmts = rows.map(row => {
             return env.TELEMETRY_DB.prepare(`
