@@ -1,4 +1,4 @@
-import { jsonError } from '../utils/helpers.js';
+import { jsonError, corsHeaders } from '../utils/helpers.js';
 import { handleAdminFilterRequest } from './filter.js';
 import { handleAdminInsightRequest } from './insight.js';
 import { handleAdminSettingsRequest } from './settings.js';
@@ -30,6 +30,26 @@ export async function handleAdminRequest(request, env, ctx, url) {
     // ---------------------------------------------------------
     if (url.pathname.startsWith("/api/admin/settings")) {
         return await handleAdminSettingsRequest(request, env, ctx, url);
+    }
+
+    // ---------------------------------------------------------
+    // 🔔 ROUTE: VAPID Public Key for Web Push
+    // ---------------------------------------------------------
+    if (request.method === "GET" && url.pathname === "/api/admin/vapid-public") {
+        try {
+            if (!env.VAPID_KEYS) {
+                return jsonError("VAPID keys are not configured on the server.", 500);
+            }
+            
+            // Parse the stored JSON secret
+            const keys = JSON.parse(env.VAPID_KEYS);
+            
+            // Return ONLY the public key
+            return Response.json({ publicKey: keys.publicKey }, { headers: corsHeaders });
+        } catch (err) {
+            console.error("VAPID Parse Error:", err);
+            return jsonError("Failed to process VAPID keys.", 500);
+        }
     }
 
     return null; // Hand back to main router if no route matched
