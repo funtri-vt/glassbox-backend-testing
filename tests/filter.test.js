@@ -75,6 +75,40 @@ describe('Filter API - Student Routes', () => {
         expect(response.status).toBe(400);
     });
 
+    // 🧹 NEW TEST: Push Notification Cleanup
+    it('should dispatch push notifications and automatically delete dead endpoints (404/410)', async () => {
+        // 1. Inject a dummy VAPID_KEYS environment variable to trigger the push logic
+        env.VAPID_KEYS = JSON.stringify({ publicKey: 'dummy_pub', privateKey: 'dummy_priv' });
+
+        // 2. Seed the DB with 1 good subscription and 2 bad subscriptions
+        await env.DB.exec(`
+            INSERT INTO admin_push_subscriptions (endpoint, p256dh, auth) VALUES 
+            ('https://web-push.local/good-push', 'key1', 'auth1'),
+            ('https://web-push.local/invalid-push1', 'key2', 'auth2'),
+            ('https://web-push.local/invalid-push2', 'key3', 'auth3');
+        `);
+
+        // 3. Trigger a student unblock request (which fires the push notifications)
+        const payload = {
+            studentHash: 'clean-up-test-hash',
+            url: 'https://test.com',
+            reason: 'Testing the push cleanup logic'
+        };
+        const req = new Request('https://worker.local/api/filter/request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        await handleFilterRequest(req, env, new URL(req.url));
+
+        // 4. Verify the database automatically pruned the two bad endpoints
+        const dbResult = await env.DB.prepare(`SELECT endpoint FROM admin_push_subscriptions`).all();
+        
+        expect(dbResult.results.length).toBe(1);
+        expect(dbResult.results[0].endpoint).toBe('https://web-push.local/good-push');
+    });
+
 });
 
 
