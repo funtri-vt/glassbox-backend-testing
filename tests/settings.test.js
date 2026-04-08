@@ -10,16 +10,12 @@ const ctx = {};
 // ==========================================
 beforeEach(async () => {
     // Wipe and recreate the system_settings table before every test
-    const schema = `
-        DROP TABLE IF EXISTS system_settings;
-        CREATE TABLE system_settings (setting_key TEXT PRIMARY KEY, setting_value TEXT NOT NULL, description TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
-        
-        -- Insert the default value as defined in initial-schema.sql
-        INSERT INTO system_settings (setting_key, setting_value, description) 
-        VALUES ('insight_unapproved_threshold_minutes', '5', 'Minimum minutes spent on an unapproved site before it is logged');
-    `;
-    
-    await env.DB.exec(schema);
+    // using .batch() to avoid SQLITE_ERROR from multi-line .exec() calls
+    await env.DB.batch([
+        env.DB.prepare(`DROP TABLE IF EXISTS system_settings`),
+        env.DB.prepare(`CREATE TABLE system_settings (setting_key TEXT PRIMARY KEY, setting_value TEXT NOT NULL, description TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`),
+        env.DB.prepare(`INSERT INTO system_settings (setting_key, setting_value, description) VALUES ('insight_unapproved_threshold_minutes', '5', 'Minimum minutes spent on an unapproved site before it is logged')`)
+    ]);
 });
 
 describe('Settings API', () => {
