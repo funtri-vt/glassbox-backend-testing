@@ -80,13 +80,12 @@ describe('Filter API - Student Routes', () => {
         // 1. Inject a dummy VAPID_KEYS environment variable to trigger the push logic
         env.VAPID_KEYS = JSON.stringify({ publicKey: 'dummy_pub', privateKey: 'dummy_priv' });
 
-        // 2. Seed the DB with 1 good subscription and 2 bad subscriptions
-        await env.DB.exec(`
-            INSERT INTO admin_push_subscriptions (endpoint, p256dh, auth) VALUES 
-            ('https://web-push.local/good-push', 'key1', 'auth1'),
-            ('https://web-push.local/invalid-push1', 'key2', 'auth2'),
-            ('https://web-push.local/invalid-push2', 'key3', 'auth3');
-        `);
+        // 2. Seed the DB with 1 good subscription and 2 bad subscriptions using batch for reliability
+        await env.DB.batch([
+            env.DB.prepare(`INSERT INTO admin_push_subscriptions (endpoint, p256dh, auth) VALUES ('https://web-push.local/good-push', 'key1', 'auth1')`),
+            env.DB.prepare(`INSERT INTO admin_push_subscriptions (endpoint, p256dh, auth) VALUES ('https://web-push.local/invalid-push1', 'key2', 'auth2')`),
+            env.DB.prepare(`INSERT INTO admin_push_subscriptions (endpoint, p256dh, auth) VALUES ('https://web-push.local/invalid-push2', 'key3', 'auth3')`)
+        ]);
 
         // 3. Trigger a student unblock request (which fires the push notifications)
         const payload = {
