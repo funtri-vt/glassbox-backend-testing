@@ -5,9 +5,16 @@
   "main": "src/index.js",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
-    "web-push": "^3.6.7"
+    "web-push": "3.6.7"
+  },
+  "devDependencies": {
+    "vitest": "1.5.0",
+    "@cloudflare/vitest-pool-workers": "0.1.18",
+    "wrangler": "3.50.0"
   }
 }
