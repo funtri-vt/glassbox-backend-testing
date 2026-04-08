@@ -113,7 +113,7 @@ async function runMidnightRollup(env) {
         // ==========================================
         // 🗄️ QUERY CLOUDFLARE ANALYTICS
         // ==========================================
-        // 🎯 FIX: Changed 0 to 0.0 so both IF arguments are identical 'Double' types!
+        // 🎯 FIX: Wrapped the string variables in ClickHouse toDateTime() functions
         const query = `
             SELECT 
                 blob3 AS target, 
@@ -122,8 +122,8 @@ async function runMidnightRollup(env) {
                 SUM(if(blob1 = 'hit_log', double1, 0.0)) AS total_hits,
                 COUNT(DISTINCT blob2) AS unique_students
             FROM glassbox_logs 
-            WHERE timestamp >= '${startSql}' 
-              AND timestamp < '${endSql}' 
+            WHERE timestamp >= toDateTime('${startSql}') 
+              AND timestamp < toDateTime('${endSql}') 
             GROUP BY target, status
         `;
 

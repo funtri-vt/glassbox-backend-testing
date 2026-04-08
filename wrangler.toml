@@ -20,6 +20,7 @@ binding = "GLASSBOX_KV"
 id = "972c1fbb2a47474b8648a1efd777388e"
 
 [observability]
+enabled = true
 [observability.logs]
 enabled = true
 invocation_logs = false
