@@ -17,7 +17,8 @@ beforeEach(async () => {
         env.DB.prepare(`DROP TABLE IF EXISTS system_settings`),
         env.DB.prepare(`DROP TABLE IF EXISTS approved_apps`),
         env.DB.prepare(`CREATE TABLE system_settings (setting_key TEXT PRIMARY KEY, setting_value TEXT NOT NULL)`),
-        env.DB.prepare(`CREATE TABLE approved_apps (id INTEGER PRIMARY KEY AUTOINCREMENT, domain TEXT NOT NULL UNIQUE, app_name TEXT NOT NULL, category TEXT)`),
+        // FIX: Added created_at column to match production schema
+        env.DB.prepare(`CREATE TABLE approved_apps (id INTEGER PRIMARY KEY AUTOINCREMENT, domain TEXT NOT NULL UNIQUE, app_name TEXT NOT NULL, category TEXT, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`),
         
         // Seed default config and one approved app
         env.DB.prepare(`INSERT INTO system_settings (setting_key, setting_value) VALUES ('insight_unapproved_threshold_minutes', '5')`),
@@ -161,10 +162,11 @@ describe('Admin Insight API - Approved Apps Management', () => {
 describe('Admin Insight API - Telemetry Reporting', () => {
 
     it('should route macroscopic queries (>7 days) to Warm Storage (D1)', async () => {
-        // 1. Seed D1 Telemetry Database with a mock rollup
+        // 1. Seed D1 Telemetry Database with a mock rollup 
+        // FIX: Using SQLite date('now', '-5 days') so it always falls within the 30-day timeframe window
         await env.TELEMETRY_DB.prepare(`
             INSERT INTO daily_rollups (log_date, target, status, total_minutes, total_hits, unique_students)
-            VALUES ('2026-01-01', 'coolmath.com', 'unapproved', 120.5, 50, 10)
+            VALUES (date('now', '-5 days'), 'coolmath.com', 'unapproved', 120.5, 50, 10)
         `).run();
 
         // 2. Request a 30-day timeframe
