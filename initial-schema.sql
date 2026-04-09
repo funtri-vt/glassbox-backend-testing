@@ -16,7 +16,8 @@ CREATE TABLE IF NOT EXISTS rules (
     action TEXT NOT NULL,              -- 'block' or 'allow'
     version_added INTEGER NOT NULL,
     version_removed INTEGER,           -- NULL if currently active
-    is_active BOOLEAN DEFAULT 1        -- 1 for active, 0 for removed
+    is_active BOOLEAN DEFAULT 1,       -- 1 for active, 0 for removed
+    expires_at TIMESTAMP DEFAULT NULL  -- NEW: NULL for permanent, timestamp for auto-expiration
 );
 
 -- Unblock Requests from Students (Filter Agent)

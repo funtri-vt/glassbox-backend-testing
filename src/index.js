@@ -31,11 +31,40 @@ export default {
         console.log(`Cron triggered for interval: ${event.cron}`);
 
         if (event.cron === "*/15 * * * *") {
-            await rebuildMasterRulesCache(env, ctx);
-
             try {
-                console.log("Running routine database cleanup...");
+                console.log("Running routine database maintenance and expiration checks...");
                 
+                // ==========================================
+                // ⏱️ 1. THE REAPER: Check for Expired Rules
+                // ==========================================
+                const expiredCheck = await env.DB.prepare(
+                    `SELECT id FROM rules WHERE is_active = 1 AND expires_at < CURRENT_TIMESTAMP`
+                ).all();
+
+                if (expiredCheck.results && expiredCheck.results.length > 0) {
+                    console.log(`Found ${expiredCheck.results.length} expired rules. Retiring them...`);
+                    
+                    // Bump system version
+                    await env.DB.prepare(`UPDATE system_state SET current_version = current_version + 1 WHERE id = 1`).run();
+                    const state = await env.DB.prepare(`SELECT current_version FROM system_state WHERE id = 1`).first();
+
+                    // Safely retire the expired rules
+                    await env.DB.prepare(
+                        `UPDATE rules SET is_active = 0, version_removed = ? WHERE is_active = 1 AND expires_at < CURRENT_TIMESTAMP`
+                    ).bind(state.current_version).run();
+                    
+                    console.log(`✅ Expired rules retired automatically at version ${state.current_version}.`);
+                }
+
+                // ==========================================
+                // ⚡ 2. Rebuild KV Cache
+                // ==========================================
+                // We do this after the Reaper so extensions immediately get the removals
+                await rebuildMasterRulesCache(env, ctx);
+
+                // ==========================================
+                // 🧹 3. Routine Cleanup (Delete Old Data)
+                // ==========================================
                 const state = await env.DB.prepare(`SELECT current_version FROM system_state WHERE id = 1`).first();
                 const cutoffVersion = Math.max(1, state.current_version - 50);
 
@@ -113,7 +142,6 @@ async function runMidnightRollup(env) {
         // ==========================================
         // 🗄️ QUERY CLOUDFLARE ANALYTICS
         // ==========================================
-        // 🎯 FIX: Wrapped the string variables in ClickHouse toDateTime() functions
         const query = `
             SELECT 
                 blob3 AS target, 
