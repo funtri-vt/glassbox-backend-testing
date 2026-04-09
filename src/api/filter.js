@@ -1,6 +1,6 @@
 import { corsHeaders, cacheHeaders, jsonError } from '../utils/helpers.js';
 import { rebuildMasterRulesCache } from '../utils/cache.js';
-import webpush from 'web-push';
+import { sendNativePush } from '../utils/push.js';
 
 // ------------------------------------------------------------------
 // 🎒 STUDENT-FACING FILTER ROUTES (No Auth Required)
@@ -28,7 +28,7 @@ export async function handleFilterRequest(request, env, url) {
 
         const requestId = insertResult ? insertResult.id : null;
 
-        // 🔔 TRIGGER WEB PUSH NOTIFICATIONS
+        // 🔔 TRIGGER NATIVE ENCRYPTED WEB PUSH
         if (requestId && env.VAPID_KEYS) {
             try {
                 // Pre-calculate the match type so the Quick Action button knows how to resolve it
@@ -49,8 +49,8 @@ export async function handleFilterRequest(request, env, url) {
                         matchType: matchType
                     });
 
-                    // Dispatch notifications concurrently
-                    const pushPromises = subscriptions.map(sub => sendWebPush(env, sub, payload, env.VAPID_KEYS));
+                    // Dispatch encrypted notifications concurrently
+                    const pushPromises = subscriptions.map(sub => sendNativeWebPush(env, sub, payload, env.VAPID_KEYS));
                     await Promise.allSettled(pushPromises);
                 }
             } catch (err) {
@@ -239,32 +239,12 @@ export async function handleAdminFilterRequest(request, env, ctx, url) {
 }
 
 // ------------------------------------------------------------------
-// 🔔 HELPER: DISPATCH WEB PUSH NOTIFICATION
+// 🔔 HELPER: NATIVE WEB PUSH WRAPPER
 // ------------------------------------------------------------------
-async function sendWebPush(env, subscription, payload, vapidKeysJson) {
+async function sendNativeWebPush(env, subscription, payloadString, vapidKeysJson) {
     try {
-        const keys = JSON.parse(vapidKeysJson);
-        
-        // Setup the VAPID details so the browser push server trusts the payload
-        webpush.setVapidDetails(
-            'mailto:admin@glassbox.local', 
-            keys.publicKey, 
-            keys.privateKey
-        );
-        
-        // Reconstruct the subscription object exactly how web-push expects it
-        const pushSubscription = {
-            endpoint: subscription.endpoint,
-            keys: {
-                p256dh: subscription.p256dh,
-                auth: subscription.auth
-            }
-        };
-
-        // Fire off the encrypted notification!
-        await webpush.sendNotification(pushSubscription, payload);
-        console.log(`✅ [Push Notification] Successfully dispatched to ${subscription.endpoint}`);
-
+        await sendNativePush(subscription, payloadString, vapidKeysJson);
+        console.log(`✅ [Push Notification] Successfully dispatched encrypted payload to ${subscription.endpoint}`);
     } catch (err) {
         // 🚨 410 GONE / 404 NOT FOUND: Subscription has expired or been revoked
         if (err.statusCode === 410 || err.statusCode === 404) {
