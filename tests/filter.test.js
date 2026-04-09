@@ -36,7 +36,7 @@ beforeEach(async () => {
         DROP TABLE IF EXISTS admin_push_subscriptions;
 
         CREATE TABLE system_state (id INTEGER PRIMARY KEY CHECK (id = 1), current_version INTEGER NOT NULL DEFAULT 1);
-        CREATE TABLE rules (id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, match_type TEXT DEFAULT 'domain', action TEXT NOT NULL, version_added INTEGER NOT NULL, version_removed INTEGER, is_active BOOLEAN DEFAULT 1);
+        CREATE TABLE rules (id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, match_type TEXT DEFAULT 'domain', action TEXT NOT NULL, version_added INTEGER NOT NULL, version_removed INTEGER, is_active BOOLEAN DEFAULT 1, expires_at TIMESTAMP DEFAULT NULL);
         CREATE TABLE unblock_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, student_hash TEXT NOT NULL, url TEXT NOT NULL, reason TEXT NOT NULL, status TEXT DEFAULT 'pending', created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE admin_push_subscriptions (id INTEGER PRIMARY KEY AUTOINCREMENT, endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
 

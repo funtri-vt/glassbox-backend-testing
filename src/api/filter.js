@@ -131,8 +131,9 @@ export async function handleAdminFilterRequest(request, env, ctx, url) {
         const countResult = await env.DB.prepare(`SELECT COUNT(*) as total FROM rules WHERE is_active = 1`).first();
         const total = countResult ? countResult.total : 0;
 
+        // 🎯 FIX: Added expires_at to the SELECT query so the Admin UI can display it
         const { results } = await env.DB.prepare(
-            `SELECT id, target, match_type, action, version_added FROM rules WHERE is_active = 1 ORDER BY id DESC LIMIT ? OFFSET ?`
+            `SELECT id, target, match_type, action, version_added, expires_at FROM rules WHERE is_active = 1 ORDER BY id DESC LIMIT ? OFFSET ?`
         ).bind(limit, offset).all();
 
         return Response.json({ rules: results, total, page, limit }, { headers: corsHeaders });
@@ -164,13 +165,20 @@ export async function handleAdminFilterRequest(request, env, ctx, url) {
     // ROUTE: POST /api/admin/filter/resolve (Admin UI approving)
     if (request.method === "POST" && url.pathname === "/api/admin/filter/resolve") {
         const body = await request.json();
-        const { requestId, action } = body;
+        // 🎯 FIX: Extract expiresInHours from the payload
+        const { requestId, action, expiresInHours } = body;
         
         const rawTarget = body.target || body.domain;
         const matchType = body.matchType || 'domain';
 
         if (action === "approve") {
             const cleanTarget = rawTarget.toLowerCase();
+
+            // 🎯 FIX: Calculate future expiration timestamp in SQLite format (YYYY-MM-DD HH:MM:SS)
+            let expiresAt = null;
+            if (expiresInHours && !isNaN(expiresInHours) && expiresInHours > 0) {
+                expiresAt = new Date(Date.now() + expiresInHours * 3600000).toISOString().replace('T', ' ').substring(0, 19);
+            }
 
             await env.DB.prepare(`UPDATE unblock_requests SET status = 'approved' WHERE id = ?`).bind(requestId).run();
             await env.DB.prepare(`UPDATE system_state SET current_version = current_version + 1 WHERE id = 1`).run();
@@ -181,9 +189,10 @@ export async function handleAdminFilterRequest(request, env, ctx, url) {
                 `UPDATE rules SET is_active = 0, version_removed = ? WHERE target = ? AND is_active = 1`
             ).bind(state.current_version, cleanTarget).run();
 
+            // 🎯 FIX: Insert the calculated expiresAt timestamp
             await env.DB.prepare(
-                `INSERT INTO rules (target, match_type, action, version_added) VALUES (?, ?, 'allow', ?)`
-            ).bind(cleanTarget, matchType, state.current_version).run();
+                `INSERT INTO rules (target, match_type, action, version_added, expires_at) VALUES (?, ?, 'allow', ?, ?)`
+            ).bind(cleanTarget, matchType, state.current_version, expiresAt).run();
 
             // ⚡ Rebuild KV Cache
             await rebuildMasterRulesCache(env, ctx);
@@ -199,6 +208,8 @@ export async function handleAdminFilterRequest(request, env, ctx, url) {
     if (request.method === "POST" && url.pathname === "/api/admin/filter/block") {
         const body = await request.json();
         let blocksToProcess = [];
+        // 🎯 FIX: Accept a global expiration setting for this batch of blocks
+        const expiresInHours = body.expiresInHours;
 
         if (Array.isArray(body.domains)) {
             blocksToProcess = body.domains.map(d => ({ target: d.toLowerCase(), matchType: 'domain' }));
@@ -211,6 +222,12 @@ export async function handleAdminFilterRequest(request, env, ctx, url) {
         if (blocksToProcess.length === 0) {
             return jsonError("Empty blocks list", 400);
         }
+        
+        // 🎯 FIX: Calculate future expiration timestamp
+        let expiresAt = null;
+        if (expiresInHours && !isNaN(expiresInHours) && expiresInHours > 0) {
+            expiresAt = new Date(Date.now() + expiresInHours * 3600000).toISOString().replace('T', ' ').substring(0, 19);
+        }
 
         await env.DB.prepare(`UPDATE system_state SET current_version = current_version + 1 WHERE id = 1`).run();
         const state = await env.DB.prepare(`SELECT current_version FROM system_state WHERE id = 1`).first();
@@ -221,10 +238,11 @@ export async function handleAdminFilterRequest(request, env, ctx, url) {
             ).bind(state.current_version, b.target)
         );
 
+        // 🎯 FIX: Bind expiresAt to the INSERT statement
         const insertStmts = blocksToProcess.map(b => 
             env.DB.prepare(
-                `INSERT INTO rules (target, match_type, action, version_added) VALUES (?, ?, 'block', ?)`
-            ).bind(b.target, b.matchType, state.current_version)
+                `INSERT INTO rules (target, match_type, action, version_added, expires_at) VALUES (?, ?, 'block', ?, ?)`
+            ).bind(b.target, b.matchType, state.current_version, expiresAt)
         );
 
         await env.DB.batch([...retireStmts, ...insertStmts]);
