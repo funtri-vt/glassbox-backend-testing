@@ -2,6 +2,9 @@ import { jsonError, corsHeaders } from '../utils/helpers.js';
 import { handleAdminFilterRequest } from './filter.js';
 import { handleAdminInsightRequest } from './insight.js';
 import { handleAdminSettingsRequest } from './settings.js';
+// 🎯 NEW IMPORTS
+import { handleAdminSchoolsRequest } from './schools.js';
+import { handleAdminUsersRequest } from './users.js';
 
 export async function handleAdminRequest(request, env, ctx, url) {
     // 🔒 GLOBAL AUTH MIDDLEWARE (RBAC)
@@ -43,6 +46,16 @@ export async function handleAdminRequest(request, env, ctx, url) {
     // ---------------------------------------------------------
     // 🚦 ROUTING: Hand off to the specific domain modules
     // ---------------------------------------------------------
+
+    // 🎯 NEW: Hand off Organization (Schools & Students) requests
+    if (url.pathname.startsWith("/api/admin/schools")) {
+        return await handleAdminSchoolsRequest(request, env, ctx, url);
+    }
+
+    // 🎯 NEW: Hand off Staff (Users) requests
+    if (url.pathname.startsWith("/api/admin/users")) {
+        return await handleAdminUsersRequest(request, env, ctx, url);
+    }
 
     // Hand off Filter-related admin requests
     if (url.pathname.startsWith("/api/admin/filter/")) {
