@@ -16,14 +16,7 @@ export async function handleAdminRequest(request, env, ctx, url) {
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return jsonError("Unauthorized", 401);
     }
-    // Attach the user object
-    request.user = user;
-
-    // 🎯 NEW: Hand off Teacher Portal requests
-    if (url.pathname.startsWith("/api/admin/teacher")) {
-        return await handleTeacherRequest(request, env, ctx, url);
-    }
-
+    
     const token = authHeader.substring(7);
     let user = null;
 
@@ -52,6 +45,12 @@ export async function handleAdminRequest(request, env, ctx, url) {
 
     // Attach the user object to the request so downstream routes can use user.school_id and user.role!
     request.user = user;
+
+
+    // 🎯 NEW: Hand off Teacher Portal requests
+    if (url.pathname.startsWith("/api/admin/teacher")) {
+        return await handleTeacherRequest(request, env, ctx, url);
+    }
 
     // ---------------------------------------------------------
     // 🚦 ROUTING: Hand off to the specific domain modules
