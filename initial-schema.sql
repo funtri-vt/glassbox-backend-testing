@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS delegated_users (
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     token TEXT, -- For active session Bearer auth
+    last_active_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, -- 🎯 ADDED: Tracks idle sessions for auto-logout
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (school_id) REFERENCES schools(id) ON DELETE CASCADE
 );
@@ -61,8 +62,8 @@ CREATE TABLE IF NOT EXISTS classroom_students (
 -- The Master Rule Table (Filter Agent)
 CREATE TABLE IF NOT EXISTS rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    school_id INTEGER DEFAULT 1,       -- 🎯 NEW: Scoped to specific school, 1 for global/default
-    classroom_id INTEGER DEFAULT NULL, -- 🎯 NEW: Scoped to a specific teacher's period
+    school_id INTEGER DEFAULT 1,       -- Scoped to specific school, 1 for global/default
+    classroom_id INTEGER DEFAULT NULL, -- Scoped to a specific teacher's period
     target TEXT NOT NULL,              -- The URL, domain, or path being blocked/allowed
     match_type TEXT DEFAULT 'domain',  -- 'domain' (all subdomains), 'host' (exact subdomain), or 'path'
     action TEXT NOT NULL,              -- 'block' or 'allow'
@@ -75,8 +76,8 @@ CREATE TABLE IF NOT EXISTS rules (
 -- Unblock Requests from Students (Filter Agent)
 CREATE TABLE IF NOT EXISTS unblock_requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    school_id INTEGER DEFAULT 1,       -- 🎯 NEW
-    classroom_id INTEGER DEFAULT NULL, -- 🎯 NEW
+    school_id INTEGER DEFAULT 1,       
+    classroom_id INTEGER DEFAULT NULL, 
     student_hash TEXT NOT NULL,
     url TEXT NOT NULL,
     reason TEXT NOT NULL,
@@ -87,7 +88,7 @@ CREATE TABLE IF NOT EXISTS unblock_requests (
 -- Stores Web Push API subscriptions for IT Admins
 CREATE TABLE IF NOT EXISTS admin_push_subscriptions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    school_id INTEGER DEFAULT 1,       -- 🎯 NEW: So pushes only go to the right admins
+    school_id INTEGER DEFAULT 1,       -- So pushes only go to the right admins
     endpoint TEXT NOT NULL UNIQUE,
     p256dh TEXT NOT NULL,
     auth TEXT NOT NULL,
@@ -101,7 +102,7 @@ CREATE TABLE IF NOT EXISTS admin_push_subscriptions (
 -- Tracks District Approved Apps for ROI calculation
 CREATE TABLE IF NOT EXISTS approved_apps (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    school_id INTEGER DEFAULT 1,       -- 🎯 NEW: Schools can have different approved apps
+    school_id INTEGER DEFAULT 1,       -- Schools can have different approved apps
     domain TEXT NOT NULL UNIQUE,       -- e.g., 'ixl.com'
     app_name TEXT NOT NULL,            -- e.g., 'IXL Math'
     category TEXT,                     -- e.g., 'Education', 'Testing'

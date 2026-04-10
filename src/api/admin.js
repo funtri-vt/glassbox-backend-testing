@@ -5,6 +5,8 @@ import { handleAdminSettingsRequest } from './settings.js';
 // 🎯 NEW IMPORTS
 import { handleAdminSchoolsRequest } from './schools.js';
 import { handleAdminUsersRequest } from './users.js';
+// 🎯 NEW IMPORT
+import { handleAdminClassroomsRequest } from './classrooms.js';
 
 export async function handleAdminRequest(request, env, ctx, url) {
     // 🔒 GLOBAL AUTH MIDDLEWARE (RBAC)
@@ -50,6 +52,11 @@ export async function handleAdminRequest(request, env, ctx, url) {
     // 🎯 NEW: Hand off Organization (Schools & Students) requests
     if (url.pathname.startsWith("/api/admin/schools")) {
         return await handleAdminSchoolsRequest(request, env, ctx, url);
+    }
+
+    // 🎯 NEW: Hand off Classrooms & Enrollments
+    if (url.pathname.startsWith("/api/admin/classrooms")) {
+        return await handleAdminClassroomsRequest(request, env, ctx, url);
     }
 
     // 🎯 NEW: Hand off Staff (Users) requests
